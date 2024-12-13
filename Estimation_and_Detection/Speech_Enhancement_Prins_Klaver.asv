@@ -2,38 +2,75 @@
 load('Data.mat')
 % Variables:
 
-freq=16000; % sample frequency
-Data_length = 601655; % total length of data given
+freq=16000; % Sample frequency
+Data_length = 601655; % Total length of data given
 FL = 0.020; % Frame length time based
 L = freq*FL; % Frame length sample based
 overlap = L/2; % Overlap samples with 50% overlap
-i = 0; % counter
-result = zeros(Data_length,1); % initialize results per frame
-Framed_matrix = zeros(Data_length,nrmics); % intialize the framed and windowed matrix composed of results matrix
-fft_Framed_matrix = zeros(Data_length,nrmics); %
-A = ones(nrmics,1);
-R_w = zeros(nrmics,nrmics);
-Variance = eye(nrmics,1);
-% create hanning window
-Window = hann(L+1);
+i = 0; % Counter
+f_k = freq/L; % in hz, frequency bin
+nrframes = floor(Data_length/160); % nr of frames over all samples
+K = 1024; % FFT length
 
-% loop though microphones
+result = zeros(Data_length,1); % Initialize results per frame
+fft_result = zeros(Data_length,1);
+Framed_matrix = zeros(Data_length,nrmics); % Intialize the framed and windowed matrix composed of results matrix
+A = ones(nrmics,1); % Given matrix comprised of ones (weights)
+R_w = zeros(nrmics,nrmics); % Covariance matrix
+Variance = eye(nrmics,1); % Variance per microphone
+S_lk = zeros(K,nrframes,nrmics);
+S_hat_lk = zeros(K,nrframes,nrmics);
+temp2 = zeros(nrmics,1);
+var_emp = zeros(nrmics,1);
+
+% Create hanning window
+Window = hann(L);
+% Find the covariance of the noise
+R_w = cov(Data(1:freq+1,:));
+
+%% exercise 1: Estimator
+% Loop though microphones
 for index=1:nrmics
-    % Find variance for each microphone:
+    % Find variance for each microphone (not used currently):
     Variance(index,1) = var(Data(1:freq+1,index));
-  
+
     % Multiply frame with each sample
-    % at indexes 1:161:321:481...
-    for frame=1:overlap:Data_length-L
-        Framed_data(:,1) = Data(frame:frame+L,index);
+    % At indexes 1:161:321:481...
+    for frame=1:overlap+1:Data_length-L
+        Framed_data(:,1) = Data(frame:frame+L-1,index);
         temp = Framed_data.*Window;
-        result(frame:frame+L,1) = result(frame:frame+L,1) + temp;
-        %i = i + 1; %frame number
+        result(frame:frame+L-1,1) = result(frame:frame+L-1,1) + temp;
     end
-    R_w = cov(Data(1:freq+1,:));
+    % Alternative:
+    fft_data = stft(Data,freq,Window=hann(L),OverlapLength=160,FFTLength=K);
+    for l=1:L
+        for k=1:K
+            S_hat = inv(A'*inv(R_w)*A)*A'*inv(R_w)*fft';
+        end
+    end
+
     Framed_matrix(:,index) = result;
-    % fft of DATA per microphone
-    fft_Framed_matrix(:,index) = fft(result,Data_length);
-    % BLUE estimator
+    % Fft of DATA per microphone
+    % BLUE estimator between microphones
     S_hat = inv(A'*inv(R_w)*A)*A'*inv(R_w)*Framed_matrix';
+    % question is why BLUE? This should be equal to MVU
 end
+
+    %% Exercise 2: emperical variance calculation:
+    % fft is taken over all data with a hanning window:
+
+    S_lk = stft(Data,freq,FFTLength=K);
+    for index2 = 1:nrmics
+        for l=1:L
+            for k=1:K
+                temp2(index2,1) = temp2(index2,1) + (abs(S_hat_lk(k,l)-S_lk(k,l,index2))^2);
+            end
+        end
+        var_emp(index2,1) = sum(temp2(1:index2,1)/(K*L));%/index2;
+    end
+% Plot results
+figure;
+plot(1:nrmics, var_emp);
+xlabel('Number of Microphones');
+ylabel('Variance of Estimator');
+title('Variance of Target Estimator as a Function of Microphones');
